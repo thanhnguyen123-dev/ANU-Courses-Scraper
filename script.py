@@ -1,8 +1,11 @@
 import requests
 import json
+from bs4 import BeautifulSoup
+import time
 
 def fetch_anu_courses():
     url = 'https://programsandcourses.anu.edu.au/data/CourseSearch/GetCourses'
+    base_course_url = 'https://programsandcourses.anu.edu.au/2025/course/'
     
     # Query parameters matching the JavaScript version
     params = {
@@ -36,7 +39,21 @@ def fetch_anu_courses():
         
         # Parse the JSON response
         data = response.json()
-        
+
+        course_data = [
+            course for course in data.get('Items', [])
+            if not course.get('CourseCode', '').startswith('EXTN')
+        ]
+
+        for course in course_data:
+            course_code = course.get('CourseCode')
+            course_url = f"{base_course_url}{course_code}"
+
+            extra_details = scrape_course_details(course_url)
+            if extra_details:
+                course.update(extra_details)
+                print(f"Updated course: {course}")
+
         # Write the Items array to a JSON file with proper formatting
         with open('courses.json', 'w', encoding='utf-8') as f:
             json.dump(data['Items'], f, indent=2)
@@ -50,6 +67,43 @@ def fetch_anu_courses():
         print(f'Error parsing JSON: {e}')
     except Exception as e:
         print(f'An unexpected error occurred: {e}')
+
+def scrape_course_details(course_url):
+    try:
+        response = requests.get(course_url)
+        print(f"Scraping {course_url}")
+        response.raise_for_status()
+
+        soup = BeautifulSoup(response.text, 'html.parser')
+
+        intro_div = soup.find('div', id='introduction')
+
+        description = []
+        prerequisites = []
+
+        if intro_div:
+            paragraphs = intro_div.find_all('p')
+            description = [
+                p.get_text(strip=True) for p in paragraphs if p.get_text(strip=True)
+            ]
+
+        prerequisites_div = soup.find('div', class_='requisite')
+        if prerequisites_div:
+            prerequisites = [
+                prereq.strip() 
+                for prereq in prerequisites_div.get_text().split('\n') 
+                if prereq.strip()
+            ]
+
+        return {
+            "description": description,
+            "prerequisites": prerequisites
+        }
+    except requests.exceptions.RequestException as e:
+        print(f'Error fetching course details: {e}')
+        return None
+
+
 
 if __name__ == '__main__':
     fetch_anu_courses()
